@@ -1,0 +1,62 @@
+{
+  "name": "doctor-platform-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Doctor Appointment & Telemedicine Platform - NestJS API",
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "start:cluster": "pm2-runtime ecosystem.config.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "seed": "ts-node prisma/seed.ts",
+    "loadtest": "node scripts/loadtest.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:dev": "node scripts/dev-db.mjs",
+    "setup": "prisma migrate deploy && npm run seed",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/compress": "^9.3.0",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/static": "^10.1.11",
+    "@nestjs/common": "^11.2.10",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.2.10",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/platform-fastify": "^11.2.10",
+    "@nestjs/platform-socket.io": "^11.2.10",
+    "@nestjs/swagger": "^11.4.8",
+    "@nestjs/throttler": "^6.8.0",
+    "@nestjs/websockets": "^11.2.10",
+    "@prisma/client": "^6.19.3",
+    "agora-token": "^2.0.7",
+    "bcryptjs": "^3.0.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "firebase-admin": "^14.5.1",
+    "ioredis": "^6.0.0",
+    "nodemailer": "^10.6.0",
+    "pm2": "^7.1.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
+    "autocannon": "^9.0.0",
+    "embedded-postgres": "^18.6.0-beta.19",
+    "prisma": "^6.19.3",
+    "socket.io-client": "^4.8.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,685 @@
+// Doctor Appointment & Telemedicine Platform — database schema
+// Conventions:
+//   * All money values are whole Bangladeshi Taka (Int).
+//   * All timestamps are stored in UTC; the API converts to Asia/Dhaka (UTC+6).
+//   * Doctors / staff are never hard-deleted — they are archived.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Enums ───────────────────────────
+
+enum Role {
+  PATIENT
+  DOCTOR
+  DOCTOR_ASSISTANT
+  CALL_AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum DoctorStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CredentialType {
+  BMDC
+  DEGREE
+  OTHER
+}
+
+enum ConsultationType {
+  ONLINE_AUDIO
+  ONLINE_VIDEO
+  CHAMBER
+}
+
+enum SlotStatus {
+  AVAILABLE
+  HELD
+  BOOKED
+  BLOCKED
+}
+
+enum AppointmentStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  EXPIRED
+}
+
+enum FeeServiceType {
+  APPOINTMENT_ONLINE
+  APPOINTMENT_CHAMBER
+  INSTANT_CALL
+}
+
+enum FeeMode {
+  FIXED
+  PERCENT
+}
+
+// ─────────────────────────── Users & Auth ───────────────────────────
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  phone        String?    @unique
+  email        String?    @unique
+  passwordHash String?
+  name         String?
+  role         Role       @default(PATIENT)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  patient             Patient?
+  doctor              Doctor?
+  refreshTokens       RefreshToken[]
+  appointments        Appointment[]
+  auditLogs           AuditLog[]
+  payments            Payment[]
+  consultations       Consultation[] @relation("PatientConsultations")
+  callRequests        CallRequest[]  @relation("PatientCallRequests")
+  handledCallRequests CallRequest[]  @relation("AgentCallRequests")
+  deviceTokens        DeviceToken[]
+
+  @@index([role, createdAt])
+  @@map("users")
+}
+
+model Patient {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @unique @db.Uuid
+  dateOfBirth      DateTime? @db.Date
+  gender           Gender?
+  address          String?
+  emergencyContact String?
+  divisionId       Int?
+  districtId       Int?
+  consentAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("patients")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model OtpCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  phone      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+  @@map("otp_codes")
+}
+
+// ─────────────────────────── Locations ───────────────────────────
+
+model Division {
+  id        Int      @id @default(autoincrement())
+  nameEn    String
+  nameBn    String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  districts District[]
+  hospitals Hospital[]
+  chambers  Chamber[]
+
+  @@map("divisions")
+}
+
+model District {
+  id         Int      @id @default(autoincrement())
+  divisionId Int
+  nameEn     String
+  nameBn     String
+  slug       String   @unique
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  division  Division   @relation(fields: [divisionId], references: [id])
+  upazilas  Upazila[]
+  hospitals Hospital[]
+  chambers  Chamber[]
+
+  @@index([divisionId, isActive])
+  @@map("districts")
+}
+
+model Upazila {
+  id         Int      @id @default(autoincrement())
+  districtId Int
+  nameEn     String
+  nameBn     String
+  slug       String   @unique
+  isCity     Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  district  District   @relation(fields: [districtId], references: [id])
+  hospitals Hospital[]
+  chambers  Chamber[]
+
+  @@index([districtId, isActive])
+  @@map("upazilas")
+}
+
+// ─────────────────────────── Doctors ───────────────────────────
+
+model Specialty {
+  id          Int      @id @default(autoincrement())
+  nameEn      String
+  nameBn      String
+  slug        String   @unique
+  icon        String?
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  doctors DoctorSpecialty[]
+
+  @@map("specialties")
+}
+
+// Designation (পদবি) is intentionally separate from Specialty.
+model Designation {
+  id        Int      @id @default(autoincrement())
+  nameEn    String
+  nameBn    String
+  rank      Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  doctors Doctor[]
+
+  @@map("designations")
+}
+
+model Hospital {
+  id         Int      @id @default(autoincrement())
+  name       String
+  nameBn     String?
+  address    String?
+  phone      String?
+  divisionId Int
+  districtId Int
+  upazilaId  Int?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  division Division  @relation(fields: [divisionId], references: [id])
+  district District  @relation(fields: [districtId], references: [id])
+  upazila  Upazila?  @relation(fields: [upazilaId], references: [id])
+  chambers Chamber[]
+
+  @@index([districtId, isActive])
+  @@map("hospitals")
+}
+
+model Doctor {
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String?            @unique @db.Uuid
+  slug               String             @unique
+  nameEn             String
+  nameBn             String?
+  gender             Gender?
+  photoUrl           String?
+  bio                String?
+  degrees            String?
+  designationId      Int?
+  experienceYears    Int                @default(0)
+  bmdcNumber         String?            @unique
+  languages          String[]           @default(["Bangla"])
+  consultationTypes  ConsultationType[] @default([CHAMBER])
+  onlineFee          Int                @default(0)
+  chamberFee         Int                @default(0)
+  ratingAvg          Float              @default(0)
+  ratingCount        Int                @default(0)
+  status             DoctorStatus       @default(DRAFT)
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedById       String?            @db.Uuid
+  isAvailableNow     Boolean            @default(false)
+  /// Demo/sample record — must be shown as "নমুনা" in apps, never as real data.
+  isDemo             Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user          User?              @relation(fields: [userId], references: [id])
+  designation   Designation?       @relation(fields: [designationId], references: [id])
+  specialties   DoctorSpecialty[]
+  credentials   DoctorCredential[]
+  chambers      Chamber[]
+  schedules     DoctorSchedule[]
+  leaves        DoctorLeave[]
+  slots         AppointmentSlot[]
+  appointments  Appointment[]
+  consultations Consultation[]
+
+  // Public listing always filters on (status, verificationStatus) and sorts by rating/fee/experience.
+  @@index([status, verificationStatus, ratingAvg(sort: Desc)])
+  @@index([status, verificationStatus, chamberFee])
+  @@index([status, verificationStatus, experienceYears(sort: Desc)])
+  @@index([nameEn])
+  @@map("doctors")
+}
+
+model DoctorSpecialty {
+  doctorId    String  @db.Uuid
+  specialtyId Int
+  isPrimary   Boolean @default(false)
+
+  doctor    Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialty Specialty @relation(fields: [specialtyId], references: [id])
+
+  @@id([doctorId, specialtyId])
+  @@index([specialtyId])
+  @@map("doctor_specialties")
+}
+
+model DoctorCredential {
+  id           String             @id @default(uuid()) @db.Uuid
+  doctorId     String             @db.Uuid
+  type         CredentialType
+  number       String?
+  title        String?
+  documentUrl  String?
+  status       VerificationStatus @default(PENDING)
+  verifiedById String?            @db.Uuid
+  verifiedAt   DateTime?
+  notes        String?
+  createdAt    DateTime           @default(now())
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@map("doctor_credentials")
+}
+
+/// Where a doctor practises. Location filtering (division/district/upazila) goes through chambers.
+model Chamber {
+  id         String   @id @default(uuid()) @db.Uuid
+  doctorId   String   @db.Uuid
+  hospitalId Int?
+  name       String
+  address    String?
+  divisionId Int
+  districtId Int
+  upazilaId  Int?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  doctor       Doctor           @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital     Hospital?        @relation(fields: [hospitalId], references: [id])
+  division     Division         @relation(fields: [divisionId], references: [id])
+  district     District         @relation(fields: [districtId], references: [id])
+  upazila      Upazila?         @relation(fields: [upazilaId], references: [id])
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+
+  @@index([districtId, isActive])
+  @@index([divisionId, isActive])
+  @@index([upazilaId])
+  @@index([doctorId])
+  @@map("chambers")
+}
+
+// ─────────────────────────── Scheduling ───────────────────────────
+
+/// Weekly recurring availability. Times are "HH:mm" in Asia/Dhaka.
+model DoctorSchedule {
+  id          String           @id @default(uuid()) @db.Uuid
+  doctorId    String           @db.Uuid
+  chamberId   String?          @db.Uuid
+  type        ConsultationType
+  /// 0 = Sunday … 6 = Saturday
+  dayOfWeek   Int
+  startTime   String
+  endTime     String
+  slotMinutes Int              @default(15)
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+
+  doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  chamber Chamber? @relation(fields: [chamberId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, dayOfWeek, isActive])
+  @@map("doctor_schedules")
+}
+
+model DoctorLeave {
+  id        String   @id @default(uuid()) @db.Uuid
+  doctorId  String   @db.Uuid
+  /// Asia/Dhaka calendar date
+  date      DateTime @db.Date
+  reason    String?
+  createdAt DateTime @default(now())
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, date])
+  @@map("doctor_leaves")
+}
+
+/// A slot row is created lazily the first time someone tries to book it.
+/// The unique (doctorId, startAt) constraint is what makes double-booking impossible.
+model AppointmentSlot {
+  id            String           @id @default(uuid()) @db.Uuid
+  doctorId      String           @db.Uuid
+  chamberId     String?          @db.Uuid
+  type          ConsultationType
+  startAt       DateTime
+  endAt         DateTime
+  status        SlotStatus       @default(AVAILABLE)
+  holdExpiresAt DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  doctor       Doctor        @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@unique([doctorId, startAt])
+  @@index([status, holdExpiresAt])
+  @@map("appointment_slots")
+}
+
+// ─────────────────────────── Booking & Fees ───────────────────────────
+
+model Appointment {
+  id            String            @id @default(uuid()) @db.Uuid
+  /// Human-readable booking ID shown to patients, e.g. "DA-7K3P9Q"
+  code          String            @unique
+  patientUserId String            @db.Uuid
+  doctorId      String            @db.Uuid
+  slotId        String            @db.Uuid
+  chamberId     String?           @db.Uuid
+  type          ConsultationType
+  scheduledAt   DateTime
+  endAt         DateTime
+  status        AppointmentStatus @default(PENDING_PAYMENT)
+  holdExpiresAt DateTime?
+  patientName   String
+  patientAge    Int?
+  patientGender Gender?
+  reason        String?
+  serviceFee    Int
+  platformFee   Int
+  totalAmount   Int
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  patient User            @relation(fields: [patientUserId], references: [id])
+  doctor  Doctor          @relation(fields: [doctorId], references: [id])
+  slot    AppointmentSlot @relation(fields: [slotId], references: [id])
+  chamber Chamber?        @relation(fields: [chamberId], references: [id])
+
+  payments      Payment[]
+  consultations Consultation[]
+
+  @@index([patientUserId, scheduledAt(sort: Desc)])
+  @@index([doctorId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([status, holdExpiresAt])
+  @@index([createdAt])
+  @@map("appointments")
+}
+
+model PlatformFeeSetting {
+  id          Int            @id @default(autoincrement())
+  serviceType FeeServiceType @unique
+  mode        FeeMode        @default(FIXED)
+  /// FIXED → taka amount; PERCENT → percent of service fee (0-100)
+  value       Int
+  isActive    Boolean        @default(true)
+  updatedAt   DateTime       @updatedAt
+
+  @@map("platform_fee_settings")
+}
+
+// ─────────────────────────── Payments ───────────────────────────
+
+enum PaymentProvider {
+  DEMO
+  BKASH
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+/// One payment attempt for an appointment or an instant call.
+/// Status changes only on the server (gateway callback/verification), never from the client.
+model Payment {
+  id                String          @id @default(uuid()) @db.Uuid
+  code              String          @unique
+  userId            String          @db.Uuid
+  appointmentId     String?         @db.Uuid
+  callRequestId     String?         @db.Uuid
+  provider          PaymentProvider
+  amount            Int
+  serviceFee        Int
+  platformFee       Int
+  status            PaymentStatus   @default(INITIATED)
+  providerPaymentId String?
+  trxId             String?         @unique
+  failureReason     String?
+  raw               Json?
+  paidAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  callRequest CallRequest? @relation(fields: [callRequestId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([appointmentId])
+  @@index([callRequestId])
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+// ─────────────────────────── Calls (Agora) ───────────────────────────
+
+enum CallMedia {
+  AUDIO
+  VIDEO
+}
+
+enum ConsultationStatus {
+  RINGING
+  ONGOING
+  ENDED
+  REJECTED
+  MISSED
+  CANCELLED
+}
+
+/// A doctor leg of a call: from an appointment, or a call-center transfer.
+/// Audio/video travels through Agora; this row is the state machine + history.
+model Consultation {
+  id            String             @id @default(uuid()) @db.Uuid
+  appointmentId String?            @db.Uuid
+  callRequestId String?            @db.Uuid
+  patientUserId String             @db.Uuid
+  doctorId      String             @db.Uuid
+  media         CallMedia
+  channelName   String
+  status        ConsultationStatus @default(RINGING)
+  ringingAt     DateTime           @default(now())
+  acceptedAt    DateTime?
+  endedAt       DateTime?
+  durationSec   Int?
+  endedBy       String?
+  createdAt     DateTime           @default(now())
+
+  patient     User         @relation("PatientConsultations", fields: [patientUserId], references: [id])
+  doctor      Doctor       @relation(fields: [doctorId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  callRequest CallRequest? @relation(fields: [callRequestId], references: [id])
+
+  @@index([doctorId, status])
+  @@index([patientUserId, createdAt(sort: Desc)])
+  @@index([appointmentId])
+  @@index([callRequestId])
+  @@map("consultations")
+}
+
+enum CallRequestStatus {
+  PAYMENT_PENDING
+  QUEUED
+  CONNECTED
+  TRANSFERRED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+/// Instant call through the call center: patient → agent (support) → doctor (transfer).
+model CallRequest {
+  id            String            @id @default(uuid()) @db.Uuid
+  code          String            @unique
+  patientUserId String            @db.Uuid
+  status        CallRequestStatus @default(PAYMENT_PENDING)
+  media         CallMedia         @default(AUDIO)
+  reason        String?
+  specialtyId   Int?
+  priority      Int               @default(0)
+  agentId       String?           @db.Uuid
+  notes         String?
+  channelName   String            @unique
+  serviceFee    Int
+  platformFee   Int
+  totalAmount   Int
+  queuedAt      DateTime?
+  connectedAt   DateTime?
+  transferredAt DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  patient       User           @relation("PatientCallRequests", fields: [patientUserId], references: [id])
+  agent         User?          @relation("AgentCallRequests", fields: [agentId], references: [id])
+  payments      Payment[]
+  consultations Consultation[]
+
+  @@index([status, priority(sort: Desc), queuedAt])
+  @@index([patientUserId, createdAt(sort: Desc)])
+  @@map("call_requests")
+}
+
+// ─────────────────────────── Settings & devices ───────────────────────────
+
+/// Integration settings managed from the admin dashboard (Agora, Gmail, Firebase…).
+/// Secret values are stored AES-256-GCM encrypted and are never returned by the API.
+model AppSetting {
+  key         String   @id
+  value       String
+  isSecret    Boolean  @default(false)
+  updatedById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+/// Firebase Cloud Messaging registration token of a logged-in app install.
+model DeviceToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+// ─────────────────────────── Audit ───────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @db.Uuid
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,18 @@
+# Optional: PostgreSQL + Redis for local development if you have Docker.
+#   docker compose up -d
+# (Without Docker use `npm run db:dev` instead — Redis is optional in development.)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: doctor_platform
+      POSTGRES_INITDB_ARGS: --encoding=UTF8
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+volumes:
+  pgdata:
