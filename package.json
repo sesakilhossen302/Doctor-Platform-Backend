@@ -4,7 +4,7 @@
   "private": true,
   "description": "Doctor Appointment & Telemedicine Platform - NestJS API",
   "scripts": {
-    "build": "prisma generate && nest build",
+    "build": "prisma generate && nest build && tsc -p tsconfig.seed.json",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:cluster": "pm2-runtime ecosystem.config.js",
@@ -18,7 +18,7 @@
     "setup": "prisma migrate deploy && npm run seed",
     "smoke": "node scripts/smoke-test.js",
     "postinstall": "prisma generate",
-    "start:prod": "prisma migrate deploy && node dist/main.js"
+    "start:prod": "prisma migrate deploy && node scripts/seed-if-enabled.js && node dist/main.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
