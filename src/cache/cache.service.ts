@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -12,7 +12,7 @@ import Redis from 'ioredis';
  * - Namespaces are versioned: bump('doctors') invalidates every cached doctor query at once.
  */
 @Injectable()
-export class CacheService implements OnModuleDestroy {
+export class CacheService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(CacheService.name);
   private readonly redis?: Redis;
   private readonly mem = new Map<string, { v: string; e: number }>();
@@ -113,6 +113,15 @@ export class CacheService implements OnModuleDestroy {
     })();
     this.inflight.set(key, p);
     return p;
+  }
+
+  /**
+   * Redis outlives deployments. Data may have changed outside the API (migrations, seed),
+   * so start every deployment with fresh cached reads.
+   */
+  async onApplicationBootstrap() {
+    await this.bump('locations', 'catalog', 'doctors');
+    for (const key of ['fees:settings', 'settings:all', 'admin:dashboard']) await this.del(key);
   }
 
   async onModuleDestroy() {
