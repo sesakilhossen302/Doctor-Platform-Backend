@@ -7,8 +7,10 @@
  */
 import { ConsultationType, DoctorStatus, FeeMode, FeeServiceType, Gender, Prisma, PrismaClient, Role, VerificationStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
+let createdStaffPassword: string | null = null;
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
 const DIVISIONS: [string, string, [string, string][]][] = [
@@ -148,7 +150,12 @@ async function main() {
   }
 
   console.log('Seeding staff accounts…');
-  const passwordHash = await bcrypt.hash('Admin@12345', 12);
+  // Local dev DB → the documented demo password. Any other DB (e.g. Railway) → a random strong
+  // password unless SEED_ADMIN_PASSWORD is given, because the demo password is public on GitHub.
+  const isLocalDb = /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? '');
+  const staffPassword = process.env.SEED_ADMIN_PASSWORD ?? (isLocalDb ? 'Admin@12345' : randomBytes(12).toString('base64url'));
+  const passwordHash = await bcrypt.hash(staffPassword, 12);
+  createdStaffPassword = (await prisma.user.count({ where: { email: 'superadmin@demo.local' } })) === 0 ? staffPassword : null;
   await prisma.user.upsert({
     where: { email: 'superadmin@demo.local' },
     create: { email: 'superadmin@demo.local', name: 'Super Admin', role: Role.SUPER_ADMIN, passwordHash },
@@ -305,7 +312,14 @@ async function linkDoctorLogins() {
 }
 
 main()
-  .then(() => console.log('Seed complete ✔'))
+  .then(() => {
+    console.log('Seed complete ✔');
+    if (createdStaffPassword) {
+      console.log('\n  Staff logins created (superadmin@demo.local, admin@demo.local, agent@demo.local)');
+      console.log(`  Password: ${createdStaffPassword}`);
+      console.log('  Save it now — it is not stored anywhere in plain text.\n');
+    }
+  })
   .catch((e) => {
     console.error(e);
     process.exit(1);
