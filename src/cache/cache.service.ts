@@ -74,19 +74,20 @@ export class CacheService implements OnApplicationBootstrap, OnModuleDestroy {
     else this.mem.delete(key);
   }
 
+  /** Missing version = 0, so the very first bump (0 → 1) already changes every key. */
   async version(ns: string): Promise<number> {
     if (this.redis) {
       const v = await this.redis.get(`ver:${ns}`).catch(() => null);
-      return v ? Number(v) : 1;
+      return v ? Number(v) : 0;
     }
-    return this.memVersions.get(ns) ?? 1;
+    return this.memVersions.get(ns) ?? 0;
   }
 
   /** Invalidate every key in the given namespaces. */
   async bump(...namespaces: string[]): Promise<void> {
     for (const ns of namespaces) {
       if (this.redis) await this.redis.incr(`ver:${ns}`).catch(() => undefined);
-      else this.memVersions.set(ns, (this.memVersions.get(ns) ?? 1) + 1);
+      else this.memVersions.set(ns, (this.memVersions.get(ns) ?? 0) + 1);
     }
   }
 
